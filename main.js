@@ -172,7 +172,10 @@ async function getVideos(service, auth, uploads) {
 async function downloadVideo(url, resolution) {
   return new Promise((resolve, reject) => {
     exec(
-      `pipenv run python ${path.join(__dirname, 'main.py')} ${resolution} ${url}`,
+      `$(cd ${__dirname} && pipenv --venv)/bin/python ${path.join(
+        __dirname,
+        'main.py',
+      )} ${resolution} ${url}`,
       (err, stdout, stderr) => {
         if (err) reject(`${err}\n\nstdout: ${stdout}\n\nstderr: ${stderr}`);
         else resolve();
