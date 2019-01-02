@@ -11,8 +11,10 @@ const { OAuth2 } = google.auth;
 const SCOPES = ['https://www.googleapis.com/auth/youtube.readonly'];
 const TOKEN_DIR = path.join(__dirname, '.credentials');
 const TOKEN_PATH = path.join(TOKEN_DIR, 'yt-bot.json');
-let CHATID;
-let TG_TOKEN;
+
+const TG_CREDENTIALS = JSON.parse(fs.readFileSync(path.join(TOKEN_DIR, 'telegram.json')));
+const CHATID = TG_CREDENTIALS.chatId;
+const bot = new TelegramBot(TG_CREDENTIALS.token, { polling: true });
 
 Array.prototype.flat = function flat() {
   return this.reduce((a, b) => [...a, ...b], []);
@@ -21,6 +23,15 @@ Array.prototype.flat = function flat() {
 Array.prototype.contains = function contains(compare) {
   return this.indexOf(compare) !== -1;
 };
+
+function errHandler(err, txt) {
+  const msg = `Error ${txt}: ${err}`;
+  console.log(msg);
+  if (bot && CHATID) {
+    bot.sendMessage(CHATID, msg);
+  }
+  process.exit();
+}
 
 function readFile(filePath) {
   return new Promise((resolve, reject) => {
@@ -40,14 +51,11 @@ function openFile(filePath) {
   });
 }
 
-function errHandler(err, txt) {
-  const msg = `Error ${txt}: ${err}`;
-  console.log(msg);
-  if (TG_TOKEN && CHATID) {
-    const bot = new TelegramBot(TG_TOKEN, { polling: false });
-    bot.sendMessage(CHATID, msg);
-  }
-  process.exit();
+function getVideoId(url) {
+  return url
+    .replace(/https?:\/\/(www\.)?youtu\.?be(.com)?\/(watch\?v=)?/, '')
+    .replace(/&.*/, '')
+    .replace(/\?.*/, '');
 }
 
 function storeToken(token) {
@@ -161,9 +169,9 @@ async function getVideos(service, auth, uploads) {
   )).flat();
 }
 
-async function downloadVideo(url) {
+async function downloadVideo(url, resolution) {
   return new Promise((resolve, reject) => {
-    exec(`pipenv run python main.py ${url}`, (err, stdout, stderr) => {
+    exec(`pipenv run python main.py ${resolution} ${url}`, (err, stdout, stderr) => {
       if (err) reject(`${err}\n\nstdout: ${stdout}\n\nstderr: ${stderr}`);
       else resolve();
     });
@@ -205,13 +213,19 @@ function splitVideo(videoPath) {
   });
 }
 
+async function sendVideo(url, reply_to_message_id, resolution) {
+  const video = getVideoId(url);
+  downloadVideo(url, resolution)
+    .then(() => getVideoPath(video))
+    .then(splitVideo)
+    .then(parts => Promise.all(
+      parts.map(videoPart => bot.sendDocument(CHATID, videoPart, { reply_to_message_id })),
+    ).then(() => parts))
+    .then(parts => parts.forEach(part => fs.unlinkSync(part)))
+    .catch(err => errHandler(err, 'while calling python download or sending video to TG'));
+}
+
 async function main() {
-  const { token, chatId } = await readFile(path.join(TOKEN_DIR, 'telegram.json'))
-    .then(content => JSON.parse(content))
-    .catch(e => errHandler(e, 'loading telegram credentials file'));
-  CHATID = chatId;
-  TG_TOKEN = token;
-  const bot = new TelegramBot(token, { polling: false });
   const secret = await readFile(path.join(TOKEN_DIR, 'client_secret.json'))
     .then(content => JSON.parse(content))
     .catch(e => errHandler(e, 'loading client secret file'));
@@ -228,18 +242,46 @@ async function main() {
   videos.forEach(async (video) => {
     if (!history.contains(video)) {
       const url = `https://www.youtube.com/watch?v=${video}`;
-      const reply_to_message_id = await bot.sendMessage(chatId, url).then(msg => msg.message_id);
-      downloadVideo(url)
-        .then(() => getVideoPath(video))
-        .then(splitVideo)
-        .then(parts => Promise.all(
-          parts.map(videoPart => bot.sendDocument(chatId, videoPart, { reply_to_message_id })),
-        ).then(() => parts))
-        .then(parts => parts.forEach(part => fs.unlinkSync(part)))
-        .catch(err => errHandler(err, 'while calling python download or sending video to TG'));
+      const { message_id } = await bot.sendMessage(CHATID, url);
+      sendVideo(url, message_id, 480);
     }
   });
   fs.writeFileSync(historyPath, videos.join('\n'));
 }
 
+bot.onText(/(https?:\/\/(www\.)?youtu\.?be(.com)?\/(watch\?v=)?\S{11})(&.*)?/, (msg, match) => {
+  const video = match[1];
+  bot.sendMessage(msg.chat.id, 'Downloading...', { reply_to_message_id: msg.message_id });
+  sendVideo(video, msg.message_id, 480);
+});
+
+bot.onText(/\/hd/, (msg) => {
+  if (!msg.reply_to_message) {
+    bot.sendMessage(msg.chat.id, 'The command must be a reply to a YT video URL message', {
+      reply_to_message_id: msg.message_id,
+    });
+    return;
+  }
+  bot.sendMessage(msg.chat.id, 'Redownloading at 720p', { reply_to_message_id: msg.message_id });
+  const original = msg.reply_to_message;
+  const video = original.text;
+  sendVideo(video.replace(/&.*/, ''), original.message_id, 720);
+});
+
+bot.onText(/\/resize (.*)/, (msg, match) => {
+  if (!msg.reply_to_message) {
+    bot.sendMessage(msg.chat.id, 'The command must be a reply to a YT video URL message', {
+      reply_to_message_id: msg.message_id,
+    });
+    return;
+  }
+  const resolution = match[1];
+  bot.sendMessage(msg.chat.id, `Redownloading at ${resolution}`, {
+    reply_to_message_id: msg.message_id,
+  });
+  const video = msg.reply_to_message.text;
+  sendVideo(video.replace(/&.*/, ''), msg.message_id, resolution);
+});
+
 main();
+setInterval(main, 2.5 * 60 * 1000);
