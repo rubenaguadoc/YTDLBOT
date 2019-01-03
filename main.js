@@ -8,6 +8,8 @@ const { google } = require('googleapis');
 
 const { OAuth2 } = google.auth;
 
+process.chdir(__dirname);
+
 const SCOPES = ['https://www.googleapis.com/auth/youtube.readonly'];
 const TOKEN_DIR = path.join(__dirname, '.credentials');
 const TOKEN_PATH = path.join(TOKEN_DIR, 'yt-bot.json');
@@ -171,16 +173,10 @@ async function getVideos(service, auth, uploads) {
 
 async function downloadVideo(url, resolution) {
   return new Promise((resolve, reject) => {
-    exec(
-      `$(cd ${__dirname} && pipenv --venv)/bin/python ${path.join(
-        __dirname,
-        'main.py',
-      )} ${resolution} ${url}`,
-      (err, stdout, stderr) => {
-        if (err) reject(`${err}\n\nstdout: ${stdout}\n\nstderr: ${stderr}`);
-        else resolve();
-      },
-    );
+    exec(`pipenv run python main.py ${resolution} ${url}`, (err, stdout, stderr) => {
+      if (err) reject(`${err}\n\nstdout: ${stdout}\n\nstderr: ${stderr}`);
+      else resolve();
+    });
   });
 }
 
