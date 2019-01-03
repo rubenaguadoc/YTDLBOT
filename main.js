@@ -173,6 +173,7 @@ async function getVideos(service, auth, uploads) {
 
 async function downloadVideo(url, resolution) {
   return new Promise((resolve, reject) => {
+    // /usr/local/bin/pipenv || $(wich pipenv)  --> Si corre n sh en vez de bash
     exec(`pipenv run python main.py ${resolution} ${url}`, (err, stdout, stderr) => {
       if (err) reject(`${err}\n\nstdout: ${stdout}\n\nstderr: ${stderr}`);
       else resolve();
