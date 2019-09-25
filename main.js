@@ -29,6 +29,7 @@ Array.prototype.contains = function contains(compare) {
 function errHandler(err, txt) {
   const msg = `Error ${txt}: ${err}`;
   console.log(msg);
+  // console.error(err);
   if (bot && CHATID) {
     bot.sendMessage(CHATID, msg);
   }
@@ -133,7 +134,7 @@ async function iterateResults(ytFun, payload) {
 }
 
 async function getSubscriptions(service, auth) {
-  return (await iterateResults(service.subscriptions.list, {
+  return (await iterateResults(service.subscriptions.list.bind(service.subscriptions), {
     auth,
     part: 'snippet',
     mine: true,
@@ -142,7 +143,7 @@ async function getSubscriptions(service, auth) {
 }
 
 async function getUploadsPlaylist(service, auth, subscriptions) {
-  return (await iterateResults(service.channels.list, {
+  return (await iterateResults(service.channels.list.bind(service.channels), {
     auth,
     id: subscriptions.join(','),
     part: 'contentDetails',
@@ -173,7 +174,7 @@ async function getVideos(service, auth, uploads) {
 
 async function downloadVideo(url, resolution) {
   return new Promise((resolve, reject) => {
-    exec(`/usr/local/bin/pipenv run python main.py ${resolution} ${url}`, (err, stdout, stderr) => {
+    exec(`export LC_ALL=C.UTF-8 && export LANG=C.UTF-8 && /usr/local/bin/pipenv run python main.py ${resolution} ${url}`, (err, stdout, stderr) => {
       if (err) reject(`${err}\n\nstdout: ${stdout}\n\nstderr: ${stderr}`);
       else resolve();
     });
